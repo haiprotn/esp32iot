@@ -53,18 +53,38 @@ ls -lh target/riscv32imc-esp-espidf/release/smart-home-firmware
 
 ### Qua USB (WSL → Windows → ESP32)
 
+> **Lưu ý:** Project dùng OTA partition table, nên phải flash thủ công 4 thành phần riêng biệt. `espflash flash` sẽ ghi sai địa chỉ với OTA layout này.
+
 ```bash
-# Tìm port (WSL cần dùng /dev/ttyUSBx hoặc /dev/ttyACMx)
-ls /dev/tty*
+# Bước 1: Build firmware
+cargo build --release --features switch_1g
 
-# Flash + monitor log
-espflash flash \
-  --monitor \
-  target/riscv32imc-esp-espidf/release/smart-home-firmware \
-  --port /dev/ttyUSB0
+# Bước 2: Convert ELF → ESP image binary
+ESPTOOL=~/.espressif/python_env/idf5.2_py3.10_env/bin/esptool.py
+$ESPTOOL --chip esp32c3 elf2image --flash_mode dio --flash_freq 80m --flash_size 4MB \
+  -o /tmp/app.bin \
+  target/riscv32imc-esp-espidf/release/smart-home-firmware
 
-# Chỉ monitor (không flash)
-espflash monitor --port /dev/ttyUSB0
+# Bước 3: Flash tất cả lên board
+BUILD=target/riscv32imc-esp-espidf/release
+$ESPTOOL --chip esp32c3 --port /dev/ttyACM0 --baud 921600 write_flash \
+  0x0      $BUILD/bootloader.bin \
+  0x8000   $BUILD/partition-table.bin \
+  0x10000  $BUILD/build/esp-idf-sys-*/out/build/ota_data_initial.bin \
+  0x20000  /tmp/app.bin
+
+# Monitor serial log
+python3 -c "
+import serial, time, re
+s = serial.Serial('/dev/ttyACM0', 115200, timeout=1)
+s.setDTR(False); s.setRTS(True); time.sleep(0.1); s.setRTS(False)
+deadline = time.time() + 30
+while time.time() < deadline:
+    line = s.readline()
+    if line:
+        print(re.sub(r'\x1b\[[0-9;]*m', '', line.decode('utf-8', errors='replace')).rstrip())
+s.close()
+"
 ```
 
 > **Lưu ý WSL2:** USB device cần được forward vào WSL qua `usbipd`:

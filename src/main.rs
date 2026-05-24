@@ -126,17 +126,30 @@ fn main() -> anyhow::Result<()> {
         info!("[Boot] No WiFi config — starting SoftAP provisioning...");
         // led.set_pattern(LedPattern::FastBlink);
 
-        // Tạo AP SSID duy nhất từ MAC
         let ap_ssid = format!("SmartHome-{}", network::get_mac_suffix());
         info!("[Boot] SoftAP SSID: '{}'", ap_ssid);
-        info!("[Boot] Kết nối vào '{}' và mở http://192.168.4.1", ap_ssid);
+        info!("[Boot] Connect to '{}' and open http://192.168.4.1", ap_ssid);
 
-        // Chờ user cấu hình (blocking)
-        // TODO: implement SoftAP flow đầy đủ
-        // let prov = provisioning::SoftApProvisioning::start(...)?;
-        // loop { if let Some((ssid, pass)) = prov.get_credentials() { ... } }
+        let prov = provisioning::SoftApProvisioning::start(
+            peripherals.modem,
+            sysloop.clone(),
+            nvs_partition.clone(),
+            &ap_ssid,
+        )?;
 
-        None
+        loop {
+            if let Some((ssid, pass)) = prov.get_credentials() {
+                storage.save_wifi(&ssid, &pass)?;
+                info!("[Provision] WiFi saved (SSID: '{}'), restarting...", ssid);
+                std::thread::sleep(Duration::from_millis(500));
+                unsafe { esp_idf_svc::sys::esp_restart() };
+            }
+            if prov.is_timed_out() {
+                warn!("[Provision] SoftAP timeout, restarting...");
+                unsafe { esp_idf_svc::sys::esp_restart() };
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
     };
 
     // ─── 7. Khởi động services (nếu có WiFi) ─────────────────────────────────

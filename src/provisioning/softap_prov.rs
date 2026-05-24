@@ -92,7 +92,7 @@ pub struct SoftApProvisioning {
 impl SoftApProvisioning {
     /// Khởi động SoftAP + HTTP server để provisioning
     pub fn start(
-        modem: &mut esp_idf_hal::modem::Modem,
+        modem: esp_idf_hal::modem::Modem,
         sysloop: EspSystemEventLoop,
         nvs: EspDefaultNvsPartition,
         ap_ssid: &str,
