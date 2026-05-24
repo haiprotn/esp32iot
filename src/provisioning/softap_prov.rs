@@ -84,6 +84,7 @@ struct ProvisionRequest {
 }
 
 pub struct SoftApProvisioning {
+    _wifi: EspWifi<'static>,
     _server: EspHttpServer<'static>,
     credentials: Arc<Mutex<Option<(String, String)>>>,
     started_at: std::time::Instant,
@@ -157,6 +158,7 @@ impl SoftApProvisioning {
         })?;
 
         Ok(Self {
+            _wifi: wifi,
             _server: server,
             credentials,
             started_at: std::time::Instant::now(),
