@@ -1,0 +1,14 @@
+[build]
+target = "riscv32imc-esp-espidf"
+
+[unstable]
+build-std = ["std", "panic_abort"]
+
+[target.riscv32imc-esp-espidf]
+linker = "ldproxy"
+runner = "espflash flash --monitor"
+
+[env]
+MCU = "esp32c3"
+ESP_IDF_VERSION = "v5.2.2"
+ESP_IDF_TOOLS_INSTALL_DIR = "global"

@@ -1,0 +1,53 @@
+[package]
+name = "smart-home-firmware"
+version = "1.0.0"
+edition = "2021"
+authors = ["haiprotn"]
+description = "IoT Smart Home Firmware cho ESP32-C3 — Rust + ESP-IDF"
+
+# Chọn product khi build: cargo build --release --features switch_1g
+[features]
+default = ["switch_1g"]
+switch_1g = []
+switch_2g = []
+switch_3g = []
+smart_plug = []
+dimmer = []
+curtain = []
+
+[dependencies]
+# ESP-IDF bindings
+esp-idf-sys  = { version = "0.36", features = ["binstart"] }
+esp-idf-hal  = "0.45"
+esp-idf-svc  = { version = "0.50", features = ["experimental"] }
+
+# Embedded HAL traits chuẩn
+embedded-hal = "1.0"
+
+# Serialization (DP data, HTTP JSON)
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+anyhow = "1"
+
+# Logging
+log = "0.4"
+
+# Collections không cần heap (dùng cho hot path)
+heapless = "0.8"
+
+[build-dependencies]
+embuild = "0.33"
+
+# ─── Tối ưu binary size cho production ───────────────────────────────────────
+[profile.release]
+opt-level     = "s"     # Tối ưu size thay vì speed
+lto           = true    # Link-time optimization
+codegen-units = 1       # Cho phép LTO tối đa
+strip         = true    # Bỏ debug symbols
+panic         = "abort" # Không cần unwinding runtime
+
+[profile.dev]
+opt-level = 1           # Đủ để chạy được, giữ debug info
+debug     = true
