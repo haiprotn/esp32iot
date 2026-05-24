@@ -236,6 +236,16 @@ fn main() -> anyhow::Result<()> {
             None => {}
         }
 
+        // ── Sync DP manager → relay (HTTP commands) ─────────────────────────
+        #[cfg(feature = "switch_1g")]
+        if let Some(dp::DpValue::Bool(target)) = dp_manager.lock().unwrap().get(1) {
+            if target != relay0.is_on() {
+                relay0.set(target)?;
+                storage.save_dp_bool(1, target)?;
+                led.set_pattern(if target { LedPattern::SolidOn } else { LedPattern::Off });
+            }
+        }
+
         // ── LED tick (mỗi 100ms = 10 × 10ms) ───────────────────────────────
         if tick_10ms % 10 == 0 {
             tick_100ms = tick_100ms.wrapping_add(1);

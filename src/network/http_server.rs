@@ -13,7 +13,8 @@ use esp_idf_svc::http::server::{Configuration as HttpConfig, EspHttpServer};
 use esp_idf_svc::io::Write;
 use log::info;
 
-use crate::dp::{manager::DpManager, codec};
+use esp_idf_svc::io::Read;
+use crate::dp::{manager::DpManager, codec, types::DpValue};
 
 /// Web UI nhúng — HTML/CSS/JS tối giản
 /// Hiển thị danh sách relay và nút toggle
@@ -101,6 +102,7 @@ impl HttpServer {
     ) -> anyhow::Result<Self> {
         let config = HttpConfig {
             stack_size: 8192,
+            uri_match_wildcard: true,
             ..Default::default()
         };
 
@@ -133,6 +135,47 @@ impl HttpServer {
             let snapshot = dp_clone.lock().unwrap().snapshot();
             let body = codec::encode_snapshot(&snapshot).to_string();
             req.into_ok_response()?.write_all(body.as_bytes())?;
+            Ok::<(), anyhow::Error>(())
+        })?;
+
+        // POST /api/dp/* → Set giá trị DP (body: {"value": true/false/number})
+        let dp_set = dp_manager.clone();
+        server.fn_handler("/api/dp/*", esp_idf_svc::http::Method::Post, move |mut req| {
+            // Lấy DP ID từ URI: "/api/dp/1" → 1
+            let uri = req.uri().to_string();
+            let id: u8 = uri.rsplit('/').next()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+
+            // Đọc body
+            let mut body = Vec::new();
+            let mut buf = [0u8; 128];
+            loop {
+                match req.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => body.extend_from_slice(&buf[..n]),
+                }
+            }
+
+            // Parse {"value": ...} và update dp_manager
+            let result = (|| -> anyhow::Result<()> {
+                let json: serde_json::Value = serde_json::from_slice(&body)?;
+                let dp_value = match &json["value"] {
+                    serde_json::Value::Bool(b)   => DpValue::Bool(*b),
+                    serde_json::Value::Number(n) => DpValue::Int(n.as_i64().unwrap_or(0) as i32),
+                    _ => return Err(anyhow::anyhow!("invalid value type")),
+                };
+                dp_set.lock().unwrap().set(id, dp_value)?;
+                Ok(())
+            })();
+
+            let mut resp = req.into_ok_response()?;
+            match result {
+                Ok(())   => resp.write_all(b"{\"ok\":true}")?,
+                Err(e)   => resp.write_all(
+                    format!("{{\"ok\":false,\"error\":\"{}\"}}", e).as_bytes()
+                )?,
+            }
             Ok::<(), anyhow::Error>(())
         })?;
 
