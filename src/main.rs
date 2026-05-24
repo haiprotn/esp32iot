@@ -57,26 +57,52 @@ fn main() -> anyhow::Result<()> {
     info!("[Boot] NVS storage ready");
 
     // ─── 2. GPIO: LED ────────────────────────────────────────────────────────
-    use drivers::{LedDriver, LedPattern};
+    use drivers::{ButtonDriver, ButtonEvent, LedDriver, LedPattern};
 
-    // Bật LED ngay khi boot (blink chậm = đang khởi động)
-    // NOTE: Trong thực tế cần map GPIO number → peripheral
-    // Đây là ví dụ với GPIO8 (LED)
-    // let mut led = LedDriver::new(peripherals.pins.gpio8)?;
-    // led.set_pattern(LedPattern::SlowBlink);
+    let mut led = LedDriver::new(peripherals.pins.gpio8)?;
+    led.set_pattern(LedPattern::SlowBlink);
     info!("[Boot] LED driver ready (GPIO{})", PRODUCT.led_pin);
 
     // ─── 3. GPIO: Relays ─────────────────────────────────────────────────────
-    info!("[Boot] Initializing {} relay(s)...", PRODUCT.relay_pins.len());
-    for (i, pin) in PRODUCT.relay_pins.iter().enumerate() {
-        info!("[Boot]   Relay {} → GPIO{}", i, pin);
+    #[cfg(feature = "switch_1g")]
+    let mut relay0 = drivers::RelayDriver::new(peripherals.pins.gpio4, 0)?;
+    #[cfg(feature = "switch_2g")]
+    let (mut relay0, mut relay1) = (
+        drivers::RelayDriver::new(peripherals.pins.gpio4, 0)?,
+        drivers::RelayDriver::new(peripherals.pins.gpio5, 1)?,
+    );
+    #[cfg(feature = "switch_3g")]
+    let (mut relay0, mut relay1, mut relay2) = (
+        drivers::RelayDriver::new(peripherals.pins.gpio4, 0)?,
+        drivers::RelayDriver::new(peripherals.pins.gpio5, 1)?,
+        drivers::RelayDriver::new(peripherals.pins.gpio6, 2)?,
+    );
+    #[cfg(feature = "smart_plug")]
+    let mut relay0 = drivers::RelayDriver::new(peripherals.pins.gpio4, 0)?;
+
+    // Khôi phục relay state từ NVS → cập nhật LED
+    #[cfg(any(feature = "switch_1g", feature = "smart_plug"))]
+    if let Ok(Some(val)) = storage.get_dp_bool(1) {
+        relay0.restore_state(val)?;
+        if val { led.set_pattern(LedPattern::SolidOn); } else { led.set_pattern(LedPattern::Off); }
     }
 
     // ─── 4. GPIO: Buttons ────────────────────────────────────────────────────
-    info!("[Boot] Initializing {} button(s)...", PRODUCT.button_pins.len());
-    for (i, pin) in PRODUCT.button_pins.iter().enumerate() {
-        info!("[Boot]   Button {} → GPIO{}", i, pin);
-    }
+    #[cfg(feature = "switch_1g")]
+    let mut btn0 = ButtonDriver::new(peripherals.pins.gpio9, 0)?;
+    #[cfg(feature = "switch_2g")]
+    let (mut btn0, mut btn1) = (
+        ButtonDriver::new(peripherals.pins.gpio6, 0)?,
+        ButtonDriver::new(peripherals.pins.gpio7, 1)?,
+    );
+    #[cfg(feature = "switch_3g")]
+    let (mut btn0, mut btn1, mut btn2) = (
+        ButtonDriver::new(peripherals.pins.gpio7, 0)?,
+        ButtonDriver::new(peripherals.pins.gpio9, 1)?,
+        ButtonDriver::new(peripherals.pins.gpio10, 2)?,
+    );
+    #[cfg(feature = "smart_plug")]
+    let mut btn0 = ButtonDriver::new(peripherals.pins.gpio5, 0)?;
 
     // ─── 5. DP Manager ───────────────────────────────────────────────────────
     let dp_manager = Arc::new(Mutex::new(
@@ -101,7 +127,7 @@ fn main() -> anyhow::Result<()> {
         let pass = storage.get_wifi_password()?.unwrap_or_default();
 
         info!("[Boot] WiFi config found: '{}'", ssid);
-        // led.set_pattern(LedPattern::SlowBlink);
+        led.set_pattern(LedPattern::SlowBlink);
 
         // Kết nối WiFi
         let mut wifi_mgr = network::WifiManager::new(
@@ -113,18 +139,18 @@ fn main() -> anyhow::Result<()> {
         match wifi_mgr.connect(&ssid, &pass) {
             Ok(ip) => {
                 info!("[Boot] WiFi connected! IP: {}", ip);
-                // led.set_pattern(LedPattern::SolidOn);
+                led.set_pattern(LedPattern::SlowBlink); // relay state sẽ set lại bên dưới
                 Some((wifi_mgr, ip, ssid, pass))
             }
             Err(e) => {
                 error!("[Boot] WiFi connect failed: {:?}", e);
-                // led.set_pattern(LedPattern::DoublePulse);
+                led.set_pattern(LedPattern::DoublePulse);
                 None
             }
         }
     } else {
         info!("[Boot] No WiFi config — starting SoftAP provisioning...");
-        // led.set_pattern(LedPattern::FastBlink);
+        led.set_pattern(LedPattern::FastBlink);
 
         let ap_ssid = format!("SmartHome-{}", network::get_mac_suffix());
         info!("[Boot] SoftAP SSID: '{}'", ap_ssid);
@@ -191,28 +217,29 @@ fn main() -> anyhow::Result<()> {
         tick_10ms = tick_10ms.wrapping_add(1);
 
         // ── Poll buttons (mỗi 10ms) ──────────────────────────────────────────
-        // Trong thực tế:
-        // for (i, btn) in buttons.iter_mut().enumerate() {
-        //     match btn.poll() {
-        //         Some(ButtonEvent::ShortPress) => {
-        //             let new_state = relays[i].toggle()?;
-        //             dp_manager.lock().unwrap().set(i as u8 + 1, DpValue::Bool(new_state))?;
-        //             storage.save_dp_bool(i as u8 + 1, new_state)?;
-        //             led.set_pattern(LedPattern::TripleBlink);
-        //         }
-        //         Some(ButtonEvent::LongPress) => {
-        //             // Reset WiFi
-        //             storage.clear_wifi()?;
-        //             esp_idf_svc::sys::esp_restart();
-        //         }
-        //         None => {}
-        //     }
-        // }
+        #[cfg(feature = "switch_1g")]
+        match btn0.poll() {
+            Some(ButtonEvent::ShortPress) => {
+                let new_state = relay0.toggle()?;
+                dp_manager.lock().unwrap().set(1, dp::DpValue::Bool(new_state)).ok();
+                storage.save_dp_bool(1, new_state)?;
+                led.set_pattern(if new_state { LedPattern::SolidOn } else { LedPattern::Off });
+                info!("[Button] Relay → {}", if new_state { "ON" } else { "OFF" });
+            }
+            Some(ButtonEvent::LongPress) => {
+                warn!("[Button] Long press — reset WiFi, restarting...");
+                led.set_pattern(LedPattern::FastBlink);
+                storage.clear_wifi()?;
+                std::thread::sleep(Duration::from_millis(1000));
+                unsafe { esp_idf_svc::sys::esp_restart() };
+            }
+            None => {}
+        }
 
         // ── LED tick (mỗi 100ms = 10 × 10ms) ───────────────────────────────
         if tick_10ms % 10 == 0 {
             tick_100ms = tick_100ms.wrapping_add(1);
-            // led.tick()?;
+            led.tick()?;
 
             // Kiểm tra countdown timers
             // check_countdowns(&mut dp_manager, &mut relays, &mut storage)?;
