@@ -12,6 +12,7 @@ pub struct ProductConfig {
     pub relay_pins: &'static [u8],
     pub button_pins: &'static [u8],
     pub led_pin: u8,
+    pub led_active_low: bool,
 
     // Power meter (chỉ dùng cho Smart Plug)
     pub has_power_meter: bool,
@@ -31,9 +32,10 @@ pub const SWITCH_1G: ProductConfig = ProductConfig {
     firmware_version: env!("CARGO_PKG_VERSION"),
 
     relay_pins:  &[4],
-    button_pins: &[5],
+    button_pins: &[9],
     led_pin: 8,
 
+    led_active_low: true,  // ESP32-C3 board LED thường active-low
     has_power_meter: false,
     power_cf_pin:  None,
     power_cf1_pin: None,
@@ -66,6 +68,7 @@ pub const SWITCH_2G: ProductConfig = ProductConfig {
     button_pins: &[6, 7],
     led_pin: 8,
 
+    led_active_low: true,  // ESP32-C3 board LED thường active-low
     has_power_meter: false,
     power_cf_pin:  None,
     power_cf1_pin: None,
@@ -89,6 +92,7 @@ pub const SWITCH_3G: ProductConfig = ProductConfig {
     button_pins: &[7, 9, 10],
     led_pin: 8,
 
+    led_active_low: true,  // ESP32-C3 board LED thường active-low
     has_power_meter: false,
     power_cf_pin:  None,
     power_cf1_pin: None,
@@ -113,6 +117,7 @@ pub const SMART_PLUG: ProductConfig = ProductConfig {
     relay_pins:  &[4],
     button_pins: &[5],
     led_pin: 8,
+    led_active_low: true,
 
     has_power_meter: true,
     power_cf_pin:  Some(6), // HLW8032 CF  → công suất

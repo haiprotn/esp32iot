@@ -25,20 +25,30 @@ pub struct LedDriver<'a> {
     pin: PinDriver<'a, AnyOutputPin, Output>,
     pattern: LedPattern,
     tick: u32,
+    active_low: bool,
 }
 
 impl<'a> LedDriver<'a> {
     pub fn new(
         pin: impl Peripheral<P = impl esp_idf_hal::gpio::OutputPin> + 'a,
+        active_low: bool,
     ) -> anyhow::Result<Self> {
         let mut driver = PinDriver::output(pin.into_ref().map_into())?;
-        driver.set_low()?;
-        log::info!("[LED] Initialized → OFF");
+        // OFF state: active_low → set_high, active_high → set_low
+        if active_low { driver.set_high()? } else { driver.set_low()? }
+        log::info!("[LED] Initialized → OFF (active_{})", if active_low { "low" } else { "high" });
         Ok(Self {
             pin: driver,
             pattern: LedPattern::Off,
             tick: 0,
+            active_low,
         })
+    }
+
+    fn write(&mut self, on: bool) -> anyhow::Result<()> {
+        let pin_high = if self.active_low { !on } else { on };
+        if pin_high { self.pin.set_high()? } else { self.pin.set_low()? }
+        Ok(())
     }
 
     /// Thay đổi pattern — reset counter
@@ -56,50 +66,36 @@ impl<'a> LedDriver<'a> {
 
         match self.pattern {
             LedPattern::Off => {
-                self.pin.set_low()?;
+                self.write(false)?;
             }
 
             LedPattern::SolidOn => {
-                self.pin.set_high()?;
+                self.write(true)?;
             }
 
             LedPattern::SlowBlink => {
-                // 1Hz: ON 500ms, OFF 500ms (5 ticks mỗi trạng thái)
-                if self.tick % 10 < 5 {
-                    self.pin.set_high()?;
-                } else {
-                    self.pin.set_low()?;
-                }
+                self.write(self.tick % 10 < 5)?;
             }
 
             LedPattern::FastBlink => {
-                // 5Hz: ON 100ms, OFF 100ms (toggle mỗi tick)
-                if self.tick % 2 == 0 {
-                    self.pin.set_high()?;
-                } else {
-                    self.pin.set_low()?;
-                }
+                self.write(self.tick % 2 == 0)?;
             }
 
             LedPattern::TripleBlink => {
-                // 3 lần nhấp nháy (mỗi lần 200ms ON + 200ms OFF) rồi tắt hẳn
-                // Tổng: 6 tick × 100ms = 600ms active, sau đó OFF
                 match self.tick {
-                    1 | 3 | 5 => self.pin.set_high()?,
-                    2 | 4 | 6 => self.pin.set_low()?,
+                    1 | 3 | 5 => self.write(true)?,
+                    2 | 4 | 6 => self.write(false)?,
                     _ => {
-                        self.pin.set_low()?;
+                        self.write(false)?;
                         self.pattern = LedPattern::Off;
                     }
                 }
             }
 
             LedPattern::DoublePulse => {
-                // 2 lần nháy nhanh rồi nghỉ dài (lặp mỗi 1 giây = 10 ticks)
                 match self.tick % 10 {
-                    0 | 2 => self.pin.set_high()?,
-                    1 | 3 => self.pin.set_low()?,
-                    _     => self.pin.set_low()?,
+                    0 | 2 => self.write(true)?,
+                    _     => self.write(false)?,
                 }
             }
         }

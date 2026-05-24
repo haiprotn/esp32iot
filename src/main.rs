@@ -59,7 +59,7 @@ fn main() -> anyhow::Result<()> {
     // ─── 2. GPIO: LED ────────────────────────────────────────────────────────
     use drivers::{ButtonDriver, ButtonEvent, LedDriver, LedPattern};
 
-    let mut led = LedDriver::new(peripherals.pins.gpio8)?;
+    let mut led = LedDriver::new(peripherals.pins.gpio8, PRODUCT.led_active_low)?;
     led.set_pattern(LedPattern::SlowBlink);
     info!("[Boot] LED driver ready (GPIO{})", PRODUCT.led_pin);
 
